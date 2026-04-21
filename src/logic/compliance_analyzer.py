@@ -9,20 +9,20 @@ class ComplianceAnalyzer:
         Options: 'Ghotra', 'Mask', 'Helmet'
         """
         self.model = None
-        self.confidence_threshold = 0.40 
+        self.confidence_threshold = 0.45  # Slightly increased for better accuracy
         self.target_item = target_item
 
         # --- MODEL CONFIGURATION ---
-        # This dictionary maps the Dashboard selection to the specific file and class names.
         self.MODEL_CONFIG = {
             "Ghotra": {
                 "path": "models/ghotra_yolov5.pt",
-                # We include multiple spellings to be safe
                 "classes": ["ghotra", "shemagh", "gotrah", "traditional_clothes"]
             },
             "Mask": {
-                "path": "models/mask_yolov5.pt",
-                "classes": ["with_mask"] 
+                "path": "models/mask_yolov5.pt", 
+                # We include 'nomask' in valid_classes so the code recognizes it,
+                # but we handle the logic in check_compliance to ignore it.
+                "classes": ["nomask", "mask", "with_mask", "without_mask"] 
             },
             "Helmet": {
                 "path": "models/helmet_yolov5.pt",
@@ -67,14 +67,19 @@ class ComplianceAnalyzer:
             
             valid_detections = []
 
-            # 1. Filter: Keep only the specific class we need
+            # 1. Logic Filter: Only trigger for POSITIVE compliance
             for box in results[0].boxes:
                 cls_id = int(box.cls[0])
-                class_name = self.model.names[cls_id]
+                class_name = self.model.names[cls_id].lower()
                 
-                # Check if this object is in our allowed list for the current dress code
-                if class_name.lower() in self.valid_classes:
-                    valid_detections.append(box)
+                # We check if it's in our list, BUT specifically exclude negative classes
+                # This ensures 'nomask' or 'without_mask' does NOT move to the next step.
+                if class_name in self.valid_classes:
+                    if class_name not in ["nomask", "without_mask"]:
+                        valid_detections.append(box)
+                    else:
+                        # This person is detected but is not compliant
+                        print(f"System Alert: Non-compliant subject detected ({class_name})")
 
             # 2. Selection: Find the Closest User (Largest Box)
             if valid_detections:
@@ -91,7 +96,7 @@ class ComplianceAnalyzer:
                         max_area = area
                         best_box = box
 
-                # 3. Draw ONLY the winner
+                # 3. Final Step: If we have a valid POSITIVE detection
                 if best_box:
                     status = "ACCESS GRANTED"
                     
@@ -99,17 +104,13 @@ class ComplianceAnalyzer:
                     coords = best_box.xyxy[0].cpu().numpy()
                     x1, y1, x2, y2 = int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
                     
-                    # Draw Green Box
+                    # Draw Green Box and Success Label
                     cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 4)
                     
-                    # Draw Label
                     label = f"{self.target_item.upper()} DETECTED"
                     (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
                     
-                    # Draw text background
                     cv2.rectangle(display_frame, (x1, y1 - 30), (x1 + w, y1), (0, 255, 0), -1)
-                    
-                    # Draw text
                     cv2.putText(display_frame, label, (x1, y1 - 10), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
         
