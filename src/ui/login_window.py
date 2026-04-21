@@ -1,155 +1,143 @@
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
 from PIL import Image
 import os
 from src.logic.database_manager import DatabaseManager
 
-class LoginWindow:
-    def __init__(self, root, open_dashboard_callback):
-        self.root = root
-        self.open_dashboard_callback = open_dashboard_callback
+class ReportPage(ctk.CTkFrame):
+    def __init__(self, parent, admin_id):
+        super().__init__(parent, fg_color="transparent")
         self.db = DatabaseManager()
+        self.admin_id = admin_id
+
+        # --- Main Navy Card ---
+        self.card = ctk.CTkFrame(self, corner_radius=15, fg_color="#1f2c41")
+        self.card.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(self.card, text="Detailed Access History", 
+                      font=("Roboto", 24, "bold"), text_color="white").pack(pady=(20, 5))
         
-        # 1. Window Settings
-        self.root.title("Multazim Security - Access Control")
-        self.root.geometry("950x600")
-        self.root.resizable(False, False)
+        ctk.CTkLabel(self.card, text="💡 Click [ View ] to see the captured evidence", 
+                      font=("Roboto", 12), text_color="#94a3b8").pack(pady=(0, 10))
+
+        # --- FILTER SECTION ---
+        self.filter_frame = ctk.CTkFrame(self.card, fg_color="#1a253a", corner_radius=10)
+        self.filter_frame.pack(fill="x", padx=20, pady=10)
+
+        ctk.CTkLabel(self.filter_frame, text="🔍 QUICK FILTERS :", 
+                     font=("Roboto", 13, "bold"), 
+                     text_color= "#3498db").pack(side="left", padx=(20, 10), pady=12)
+
+        ctk.CTkLabel(self.filter_frame, text="|", text_color="#334155").pack(side="left", padx=5)
+
+        # Status Filter
+        ctk.CTkLabel(self.filter_frame, text="Status", font=("Roboto", 12)).pack(side="left", padx=(15, 5))
+        self.status_var = ctk.StringVar(value="All")
+        ctk.CTkOptionMenu(self.filter_frame, values=["All", "GRANTED", "DENIED"],
+                           variable=self.status_var, command=self.apply_filters,
+                           width=110, height=32, fg_color="#1f2c41", button_color="#3498db").pack(side="left", padx=5)
+
+        # Type Filter
+        ctk.CTkLabel(self.filter_frame, text="Type", font=("Roboto", 12)).pack(side="left", padx=(15, 5))
+        self.mode_var = ctk.StringVar(value="All")
+        ctk.CTkOptionMenu(self.filter_frame, values=["All", "Ghotra", "Mask", "Helmet"],
+                           variable=self.mode_var, command=self.apply_filters,
+                           width=110, height=32, fg_color="#1f2c41", button_color="#3498db").pack(side="left", padx=5)
+
+        # Reset Button
+        ctk.CTkButton(self.filter_frame, text="Reset All", width=90, height=32, fg_color="#e74c3c", 
+                      hover_color="#c0392b", font=("Roboto", 12, "bold"),
+                      command=self.reset_filters).pack(side="right", padx=20)
+
+        # --- TABLE ---
+        self.setup_table()
         
-        ctk.set_appearance_mode("Dark")
-        ctk.set_default_color_theme("blue") 
-
-        # --- Load and Process Logo ---
-        current_path = os.path.dirname(os.path.realpath(__file__))
-        logo_path = os.path.join(current_path, "../../assets/multazim logo.png")
+        # Click listener for the [ View ] link
+        self.tree.bind("<ButtonRelease-1>", self.on_table_click)
         
-        try:
-            original_img = Image.open(logo_path).convert("RGBA")
-            self.logo_image = ctk.CTkImage(
-                light_image=original_img,
-                dark_image=original_img,
-                size=(380, 380) # Large, centered logo
-            )
-        except Exception as e:
-            print(f"⚠️ Error loading logo: {e}")
-            self.logo_image = None
+        self.apply_filters()
 
-        # --- 2. LAYOUT DESIGN (SPLIT SCREEN) ---
+    def setup_table(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview", background="#1a253a", foreground="white", 
+                        fieldbackground="#1a253a", rowheight=35, font=("Roboto", 11))
+        style.map("Treeview", background=[('selected', '#3498db')])
+
+        columns = ("id", "timestamp", "mode", "org", "result", "image")
+        self.tree = ttk.Treeview(self.card, columns=columns, show="headings")
         
-        # LEFT SIDE: Solid White Background
-        self.left_frame = ctk.CTkFrame(root, width=450, corner_radius=0, fg_color="#ffffff") 
-        self.left_frame.pack(side="left", fill="both", expand=True)
-        
-        if self.logo_image:
-            # Centered exactly in the white half
-            self.logo_label = ctk.CTkLabel(self.left_frame, image=self.logo_image, text="")
-            self.logo_label.place(relx=0.5, rely=0.5, anchor="center")
+        self.tree.heading("id", text="Log ID")
+        self.tree.heading("timestamp", text="Timestamp")
+        self.tree.heading("mode", text="Mode")
+        self.tree.heading("org", text="Organization")
+        self.tree.heading("result", text="Result")
+        self.tree.heading("image", text="Image") 
 
-        # RIGHT SIDE: Solid Dark Navy Background
-        self.right_frame = ctk.CTkFrame(root, width=500, corner_radius=0, fg_color="#0f172a")
-        self.right_frame.pack(side="right", fill="both", expand=True)
+        for col, w in zip(columns, [60, 180, 100, 150, 100, 100]):
+            self.tree.column(col, width=w, anchor="center")
 
-        # Container for the form to keep it centered on the navy side
-        self.form_container = ctk.CTkFrame(self.right_frame, fg_color="transparent")
-        self.form_container.place(relx=0.5, rely=0.5, anchor="center")
+        self.tree.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # TITLE: Updated to "Welcome to Multazim"
-        ctk.CTkLabel(self.form_container, text="Welcome to Multazim", 
-                      font=("Roboto", 32, "bold"), 
-                      text_color="white").pack(pady=(0, 5))
+    def on_table_click(self, event):
+        region = self.tree.identify_region(event.x, event.y)
+        if region == "cell":
+            column = self.tree.identify_column(event.x)
+            # Column #6 is the 'Image' column
+            if column == "#6": 
+                item = self.tree.identify_row(event.y)
+                if item:
+                    # FIX: We use 'item' directly because we set iid=rec[0] 
+                    # in apply_filters. This 'item' IS the Database ID.
+                    log_id = item
+                    self.open_image_popup(log_id)
 
-        # SUBTITLE: Updated to (Smart dress code access system)
-        ctk.CTkLabel(self.form_container, text="(Smart dress code access system)", 
-                      font=("Roboto", 14), 
-                      text_color="#60a5fa").pack(pady=(0, 40))
+    def open_image_popup(self, log_id):
+        conn = self.db.get_connection()
+        res = conn.execute("SELECT ImagePath FROM AccessLog WHERE LogID=?", (log_id,)).fetchone()
+        conn.close()
 
-        # Input Fields
-        self.user_entry = ctk.CTkEntry(self.form_container, placeholder_text="Username", 
-                                       width=320, height=55, corner_radius=12,
-                                       fg_color="#1e293b", border_color="#334155",
-                                       text_color="white")
-        self.user_entry.pack(pady=10)
+        if res and res[0]:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+            full_path = os.path.join(project_root, res[0])
 
-        self.pass_entry = ctk.CTkEntry(self.form_container, placeholder_text="Password", 
-                                       show="*", width=320, height=55, corner_radius=12,
-                                       fg_color="#1e293b", border_color="#334155",
-                                       text_color="white")
-        self.pass_entry.pack(pady=10)
+            if os.path.exists(full_path):
+                pop = ctk.CTkToplevel(self)
+                pop.title(f"Capture Detail - Log #{log_id}")
+                pop.geometry("620x540")
+                pop.attributes("-topmost", True)
 
-        # Login Button
-        self.login_btn = ctk.CTkButton(self.form_container, text="LOGIN", 
-                                        width=320, height=60, corner_radius=12, 
-                                        font=("Roboto", 16, "bold"),
-                                        fg_color="#2563eb", hover_color="#1d4ed8",
-                                        command=self.check_login)
-        self.login_btn.pack(pady=40)
-
-        self.reg_link = ctk.CTkButton(self.form_container, text="Create a new Account", 
-                                       fg_color="transparent", text_color="#60a5fa", 
-                                       hover_color="#1e293b", font=("Roboto", 13, "underline"),
-                                       command=self.open_register_window)
-        self.reg_link.pack()
-
-    # --- Logical Functions ---
-    def check_login(self):
-        u, p = self.user_entry.get(), self.pass_entry.get()
-        if not u or not p:
-            messagebox.showwarning("Warning", "Please fill in all fields")
-            return
-        admin_id = self.db.validate_login(u, p)
-        if admin_id:
-            self.open_dashboard_callback(admin_id)
-        else:
-            messagebox.showerror("Access Denied", "Invalid Username or Password")
-
-    def open_register_window(self):
-        self.reg_win = ctk.CTkToplevel(self.root)
-        self.reg_win.title("Create New Admin")
-        self.reg_win.geometry("450x650") # Increased height for the new field
-        self.reg_win.attributes("-topmost", True)
-        self.reg_win.grab_set()
-        
-        ctk.CTkLabel(self.reg_win, text="Register Admin", font=("Roboto", 22, "bold")).pack(pady=25)
-        
-        new_u = ctk.CTkEntry(self.reg_win, placeholder_text="New Username", width=320, height=45)
-        new_u.pack(pady=10)
-        
-        new_e = ctk.CTkEntry(self.reg_win, placeholder_text="Email Address", width=320, height=45)
-        new_e.pack(pady=10)
-        
-        new_p = ctk.CTkEntry(self.reg_win, placeholder_text="Password", show="*", width=320, height=45)
-        new_p.pack(pady=10)
-        
-        new_o = ctk.CTkEntry(self.reg_win, placeholder_text="Organization Name", width=320, height=45)
-        new_o.pack(pady=10)
-
-        # --- NEW DRESS CODE SELECTION ---
-        ctk.CTkLabel(self.reg_win, text="Default Required Attire:", font=("Roboto", 14)).pack(pady=(10, 5))
-        
-        # Variable to hold the selection
-        dress_choice = ctk.StringVar(value="Ghotra") 
-        dress_menu = ctk.CTkOptionMenu(self.reg_win, values=["Ghotra", "Mask", "Helmet"], 
-                                      variable=dress_choice, width=320, height=40,
-                                      fg_color="#1e293b", button_color="#2563eb")
-        dress_menu.pack(pady=10)
-        
-        def handle_reg():
-            user = new_u.get()
-            mail = new_e.get()
-            pwd = new_p.get()
-            org = new_o.get()
-            dress = dress_choice.get() # Get the selected value
-
-            if not user or not pwd:
-                messagebox.showwarning("Incomplete", "Username and Password are required!")
-                return
-            
-            # Update this call to include the 'dress' parameter
-            if self.db.register_admin(user, mail, pwd, org, dress):
-                messagebox.showinfo("Success", f"Account created for {user}!")
-                self.reg_win.destroy()
+                img = Image.open(full_path)
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(580, 420))
+                ctk.CTkLabel(pop, image=ctk_img, text="").pack(pady=20)
+                ctk.CTkButton(pop, text="Close", command=pop.destroy).pack(pady=10)
             else:
-                messagebox.showerror("Failed", "Username already exists.")
-                
-        ctk.CTkButton(self.reg_win, text="CREATE ACCOUNT", width=250, height=50, 
-                      fg_color="#27ae60", hover_color="#219150", font=("Roboto", 16, "bold"),
-                      command=handle_reg).pack(pady=35)
+                messagebox.showerror("Error", "Image file missing.")
+
+    def apply_filters(self, *args):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        records = self.db.get_access_history(self.admin_id, self.status_var.get(), self.mode_var.get())
+        total_count = len(records)
+        
+        for i, rec in enumerate(records):
+            display_id = total_count - i
+            view_btn = "[ View ]"
+            
+            # (DisplayID, Timestamp, Mode, Org, Result, [View])
+            display_values = (display_id, rec[1], rec[2], rec[4], rec[3], view_btn)
+            
+            # iid=rec[0] is the SECRET Database ID (like 40). 
+            # This is what on_table_click uses.
+            self.tree.insert("", "end", iid=rec[0], values=display_values)
+            
+            tag = "granted" if rec[3] == "GRANTED" else "denied"
+            self.tree.tag_configure("granted", foreground="#2ecc71")
+            self.tree.tag_configure("denied", foreground="#e74c3c")
+            self.tree.item(rec[0], tags=(tag,))
+            
+    def reset_filters(self):
+        self.status_var.set("All")
+        self.mode_var.set("All")
+        self.apply_filters()
