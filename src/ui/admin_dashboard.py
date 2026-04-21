@@ -1,164 +1,118 @@
-# import tkinter as tk
-# from tkinter import messagebox
-# from src.ui.door_window import DoorAccessWindow
-# from src.ui.report_window import ReportWindow
-
-# class AdminDashboard:
-#     def __init__(self, root, admin_id):
-#         self.root = root
-#         self.admin_id = admin_id
-        
-#         self.root.title("Multazim - Admin Dashboard")
-#         self.root.geometry("600x500")
-        
-#         self.door_window = None 
-#         self.report_window = None
-
-#         # --- HEADER ---
-#         header_frame = tk.Frame(root, bg="#2c3e50", height=60)
-#         header_frame.pack(fill="x")
-        
-#         title_lbl = tk.Label(header_frame, text="Admin Dashboard", font=("Arial", 14, "bold"), bg="#2c3e50", fg="white")
-#         title_lbl.pack(side="left", padx=20, pady=10)
-        
-#         logout_btn = tk.Button(header_frame, text="Logout", bg="#c0392b", fg="white", command=self.logout)
-#         logout_btn.pack(side="right", padx=20, pady=10)
-
-#         # --- SETTINGS ---
-#         settings_frame = tk.Frame(root, pady=20)
-#         settings_frame.pack()
-
-#         tk.Label(settings_frame, text="Required Dress Code:", font=("Arial", 12)).pack(pady=5)
-        
-#         self.dress_var = tk.StringVar(value="Ghotra")
-        
-#         # --- NEW OPTIONS ---
-#         dress_options = ["Ghotra", "Mask", "Helmet"]
-        
-#         self.combo = tk.OptionMenu(settings_frame, self.dress_var, *dress_options)
-#         self.combo.config(width=20)
-#         self.combo.pack(pady=5)
-        
-#         save_btn = tk.Button(settings_frame, text="Save Settings", command=lambda: messagebox.showinfo("Saved", "Settings Updated"))
-#         save_btn.pack(pady=10)
-
-#         # --- ACTIONS ---
-#         action_frame = tk.Frame(root, pady=20)
-#         action_frame.pack()
-
-#         report_btn = tk.Button(action_frame, text="📄 VIEW REPORTS", 
-#                                font=("Arial", 12), width=25,
-#                                command=self.open_report_window)
-#         report_btn.pack(pady=10)
-
-#         launch_btn = tk.Button(action_frame, text="🚀 LAUNCH DOOR LIVE FEED", 
-#                                bg="#27ae60", fg="white", font=("Arial", 14, "bold"),
-#                                width=25, height=2, command=self.open_door_window)
-#         launch_btn.pack(pady=10)
-
-#     def open_report_window(self):
-#         if self.report_window is None or not tk.Toplevel.winfo_exists(self.report_window):
-#             self.report_window = ReportWindow(self.root, self.admin_id)
-#         else:
-#             self.report_window.lift()
-
-#     def open_door_window(self):
-#         # 1. Get the current selection (e.g., "Helmet")
-#         selected_item = self.dress_var.get()
-        
-#         if self.door_window is None or not tk.Toplevel.winfo_exists(self.door_window):
-#             # 2. Pass it to the Door Window
-#             self.door_window = DoorAccessWindow(self.root, self.admin_id, selected_item)
-#         else:
-#             self.door_window.lift() 
-
-#     def logout(self):
-#         if messagebox.askyesno("Logout", "Are you sure?"):
-#             self.root.quit()
-
 import customtkinter as ctk
 from tkinter import messagebox
+from PIL import Image
+import os
+
 from src.ui.door_window import DoorAccessWindow
-from src.ui.report_window import ReportWindow
+from src.ui.report_window import ReportPage
+from src.ui.settings_page import SettingsPage
+from src.logic.database_manager import DatabaseManager
 
 class AdminDashboard:
     def __init__(self, root, admin_id):
         self.root = root
         self.admin_id = admin_id
+        self.db = DatabaseManager()
         
-        self.root.title("Multazim - Command Center")
-        self.root.geometry("1000x600")
+        # --- THEME COLORS ---
+        self.sidebar_white = "#ffffff"
+        self.navy_dark = "#1a253a"
+        self.bg_main = "#0f172a"
+        self.accent_blue = "#3498db"
+        self.border_gray = "#e2e8f0"
         
-        self.door_window = None
-        self.report_window = None
+        self.root.title("Multazim Security - Command Center")
+        self.root.geometry("1150x750")
+        ctk.set_appearance_mode("Dark")
 
-        # --- LAYOUT GRID ---
+        # Sync dress code from DB
+        saved_dress = self.get_saved_dress_code()
+        self.dress_var = ctk.StringVar(value=saved_dress)
+
+        # --- LOAD LOGO ---
+        current_path = os.path.dirname(os.path.realpath(__file__))
+        logo_path = os.path.join(current_path, "../../assets/multazim logo.png")
+        
+        try:
+            logo_img = Image.open(logo_path)
+            self.sidebar_logo = ctk.CTkImage(light_image=logo_img, dark_image=logo_img, size=(180, 180))
+        except:
+            self.sidebar_logo = None
+
+        # --- LAYOUT ---
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
-        # --- 1. SIDEBAR (Left) ---
-        self.sidebar = ctk.CTkFrame(root, width=200, corner_radius=0)
+        self.sidebar = ctk.CTkFrame(root, width=260, corner_radius=0, fg_color=self.sidebar_white)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(4, weight=1)
 
-        # Logo / Title
-        ctk.CTkLabel(self.sidebar, text="MULTAZIM", font=("Roboto", 20, "bold")).grid(row=0, column=0, padx=20, pady=20)
+        if self.sidebar_logo:
+            ctk.CTkLabel(self.sidebar, image=self.sidebar_logo, text="").pack(pady=(40, 20))
 
-        # Menu Buttons
-        self.btn_dash = ctk.CTkButton(self.sidebar, text="Dashboard", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"))
-        self.btn_dash.grid(row=1, column=0, padx=20, pady=10)
+        self.btn_live = self.add_nav_button("📹 Live Monitor", self.show_live_view)
+        self.btn_reports = self.add_nav_button("📊 View Reports", self.show_reports_view)
+        self.btn_settings = self.add_nav_button("⚙️ Profile Settings", self.show_settings_view)
+
+        self.btn_logout = ctk.CTkButton(self.sidebar, text="Log Out", fg_color="#c0392b", 
+                                       hover_color="#e74c3c", height=45, corner_radius=12,
+                                       text_color="white", font=("Roboto", 14, "bold"),
+                                       command=self.logout)
+        self.btn_logout.pack(side="bottom", padx=20, pady=30, fill="x")
+
+        self.main_container = ctk.CTkFrame(root, corner_radius=0, fg_color=self.bg_main)
+        self.main_container.grid(row=0, column=1, sticky="nsew")
+
+        self.show_live_view()
+
+    def get_saved_dress_code(self):
+        try:
+            conn = self.db.get_connection()
+            res = conn.execute("SELECT ActiveRequiredDress FROM Admin WHERE AdminID=?", (self.admin_id,)).fetchone()
+            conn.close()
+            return res[0] if res else "Ghotra"
+        except: return "Ghotra"
+
+    def add_nav_button(self, text, command):
+        btn = ctk.CTkButton(self.sidebar, text=text, fg_color="transparent", text_color=self.navy_dark, 
+                            border_width=1, border_color=self.border_gray, hover_color="#f8fafc",
+                            anchor="w", height=50, corner_radius=15, font=("Roboto", 14, "bold"), command=command)
+        btn.pack(fill="x", padx=20, pady=8)
+        return btn
+
+    def update_btn_styles(self, active_btn):
+        for b in [self.btn_live, self.btn_reports, self.btn_settings]:
+            b.configure(fg_color="transparent", text_color=self.navy_dark, border_width=1, border_color=self.border_gray)
+        active_btn.configure(fg_color=self.accent_blue, text_color="white", border_width=0)
+
+    def clear_main_area(self):
+        for widget in self.main_container.winfo_children(): widget.destroy()
+
+    def show_live_view(self):
+        self.clear_main_area()
+        self.update_btn_styles(self.btn_live)
+        ctk.CTkLabel(self.main_container, text=f"Welcome back, Admin #{self.admin_id}", 
+                     font=("Roboto", 14), text_color="#94a3b8").pack(anchor="w", padx=40, pady=(40, 0))
+        card = ctk.CTkFrame(self.main_container, corner_radius=15, fg_color="#1f2c41")
+        card.pack(expand=True, fill="both", padx=40, pady=40)
+        ctk.CTkLabel(card, text="Gate Operations", font=("Roboto", 24, "bold"), text_color="white").pack(pady=40)
+        ctk.CTkButton(card, text="🚀 LAUNCH LIVE GATE MONITOR", font=("Roboto", 22, "bold"), height=100, width=500, 
+                       fg_color="#27ae60", hover_color="#2ecc71",
+                       command=lambda: DoorAccessWindow(self.root, self.admin_id, self.dress_var.get())).pack(pady=20)
+        ctk.CTkLabel(card, text="SYSTEM STATUS: ONLINE • DB: CONNECTED", text_color="#2ecc71", font=("Roboto", 12, "bold")).pack(side="bottom", pady=20)
+
+    def show_reports_view(self):
+        self.clear_main_area()
+        self.update_btn_styles(self.btn_reports)
         
-        self.btn_reports = ctk.CTkButton(self.sidebar, text="View Reports", command=self.open_report_window)
-        self.btn_reports.grid(row=2, column=0, padx=20, pady=10)
+        # We create a NEW instance of ReportPage every time the button is clicked.
+        # This forces the __init__ and apply_filters() to run again, fetching fresh data.
+        self.current_report_page = ReportPage(self.main_container, self.admin_id)
+        self.current_report_page.pack(expand=True, fill="both")
 
-        # Logout (Bottom)
-        self.btn_logout = ctk.CTkButton(self.sidebar, text="Log Out", fg_color="#c0392b", hover_color="#e74c3c", command=self.logout)
-        self.btn_logout.grid(row=5, column=0, padx=20, pady=20)
-
-        # --- 2. MAIN CONTENT (Right) ---
-        self.main_area = ctk.CTkFrame(root, corner_radius=10, fg_color="transparent")
-        self.main_area.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-
-        # -- SETTINGS CARD --
-        self.card_settings = ctk.CTkFrame(self.main_area)
-        self.card_settings.pack(fill="x", pady=10)
-        
-        ctk.CTkLabel(self.card_settings, text="Active Detection Mode", font=("Roboto", 16, "bold")).pack(pady=10)
-        
-        self.dress_var = ctk.StringVar(value="Ghotra")
-        self.combo = ctk.CTkOptionMenu(self.card_settings, values=["Ghotra", "Mask", "Helmet"], variable=self.dress_var)
-        self.combo.pack(pady=10)
-        
-        # -- ACTION CARD --
-        self.card_actions = ctk.CTkFrame(self.main_area)
-        self.card_actions.pack(fill="both", expand=True, pady=10)
-
-        ctk.CTkLabel(self.card_actions, text="System Controls", font=("Roboto", 16, "bold")).pack(pady=20)
-
-        # Big Launch Button
-        self.btn_launch = ctk.CTkButton(self.card_actions, text="🚀 LAUNCH LIVE GATE MONITOR", 
-                                      font=("Roboto", 18, "bold"), height=80, fg_color="#27ae60", hover_color="#2ecc71",
-                                      command=self.open_door_window)
-        self.btn_launch.pack(padx=50, pady=20, fill="x")
-
-        # Stats (Optional Decoration)
-        self.stats_lbl = ctk.CTkLabel(self.card_actions, text="System Status: ONLINE • Database: CONNECTED", text_color="gray")
-        self.stats_lbl.pack(side="bottom", pady=20)
-
-    def open_report_window(self):
-        if self.report_window is None or not self.report_window.winfo_exists():
-            # Note: We keep ReportWindow as standard Tkinter or upgrade it separately
-            self.report_window = ReportWindow(self.root, self.admin_id)
-        else:
-            self.report_window.lift()
-
-    def open_door_window(self):
-        selected = self.dress_var.get()
-        if self.door_window is None or not self.door_window.winfo_exists():
-            self.door_window = DoorAccessWindow(self.root, self.admin_id, selected)
-        else:
-            self.door_window.lift()
+    def show_settings_view(self):
+        self.clear_main_area()
+        self.update_btn_styles(self.btn_settings)
+        SettingsPage(self.main_container, self.admin_id, self.db, self.dress_var).pack(expand=True, fill="both")
 
     def logout(self):
-        if messagebox.askyesno("Logout", "Exit Admin Session?"):
-            self.root.destroy()
+        if messagebox.askyesno("Logout", "Do you want to end the session?"): self.root.destroy()
