@@ -11,7 +11,7 @@ from src.logic.database_manager import DatabaseManager
 class DoorAccessWindow(tk.Toplevel):
     def __init__(self, parent, admin_id, required_item):
         super().__init__(parent)
-        self.parent = parent  # Reference to Dashboard for the restart trick
+        self.parent = parent 
         self.admin_id = admin_id
         self.required_item = required_item 
         self.db = DatabaseManager()
@@ -21,9 +21,12 @@ class DoorAccessWindow(tk.Toplevel):
         self.configure(bg="#f0f0f0")
 
         # --- SETTINGS ---
-        self.REQUIRED_HOLD_DURATION = 1.2   # 1.2 seconds countdown
+        self.REQUIRED_HOLD_DURATION = 1.2    
+        self.MAX_SCAN_DURATION = 20.0       
+        
         self.state = "IDLE"
         self.gotrah_timer_start = None
+        self.scan_start_time = None         
         self.frozen_frame = None
 
         # --- UI SETUP ---
@@ -31,26 +34,26 @@ class DoorAccessWindow(tk.Toplevel):
                                      font=("Helvetica", 24, "bold"), bg="#f0f0f0", fg="#333")
         self.status_label.pack(pady=20)
 
+
+        self.timer_label = tk.Label(self, text="", font=("Helvetica", 14), bg="#f0f0f0", fg="#e74c3c")
+        self.timer_label.pack()
+
         self.video_frame = tk.Label(self, bg="black")
         self.video_frame.pack(padx=20, pady=10)
 
-        # BUTTON AREA
         self.btn_frame = tk.Frame(self, bg="#f0f0f0")
         self.btn_frame.pack(pady=20)
 
-        # 1. START SCAN BUTTON
         self.start_btn = tk.Button(self.btn_frame, text="START SCANNING", 
                                   font=("Helvetica", 14, "bold"), bg="#007bff", fg="white", 
                                   width=20, height=2, command=self.start_scan)
         self.start_btn.pack(side="left", padx=10)
 
-        # 2. NEXT USER / RESTART BUTTON
         self.reset_btn = tk.Button(self.btn_frame, text="NEXT USER (RESTART)", 
                                   font=("Helvetica", 14, "bold"), bg="#27ae60", fg="white", 
                                   width=20, height=2, command=self.reset_gate)
         self.reset_btn.pack(side="left", padx=10)
 
-        # --- SYSTEM INIT ---
         try:
             self.analyzer = ComplianceAnalyzer(target_item=self.required_item)
             self.camera = CameraManager(source=0)
@@ -63,67 +66,74 @@ class DoorAccessWindow(tk.Toplevel):
         self.update_loop()
 
     def start_scan(self):
-        """Prepares the UI for scanning"""
         self.state = "DETECTING"
+        self.scan_start_time = time.time() 
         self.start_btn.config(state="disabled", text="SCANNING...", bg="#95a5a6")
         self.status_label.config(text="Searching...", fg="#d35400")
 
     def reset_gate(self):
-        """The 'Clean Restart' method to avoid freezes"""
         aid = self.admin_id
         item = self.required_item
-        self.destroy() # Kills camera and old memory
-        
-        # Re-open fresh window from the dashboard parent
+        self.destroy() 
         from src.ui.door_window import DoorAccessWindow
         DoorAccessWindow(self.parent, aid, item)
 
     def update_loop(self):
         if not self.winfo_exists(): return
 
-        # --- STATE 1: SUCCESS (STAY FROZEN) ---
-        if self.state == "SUCCESS":
+        if self.state in ["SUCCESS", "FAILED"]:
             if self.frozen_frame is not None:
                 self.render_frame(self.frozen_frame)
             self.after(30, self.update_loop)
             return
 
-        # --- STATE 2: LIVE CAMERA FEED ---
         frame = self.camera.get_frame()
         if frame is not None:
             current_display = frame.copy()
 
             if self.state == "DETECTING":
+
+                elapsed_scan = time.time() - self.scan_start_time
+                remaining_scan = self.MAX_SCAN_DURATION - elapsed_scan
+                
+
+                self.timer_label.config(text=f"Time Remaining: {max(0, remaining_scan):.1f}s")
+
+                if elapsed_scan >= self.MAX_SCAN_DURATION:
+                    self.state = "FAILED"
+                    self.frozen_frame = current_display.copy()
+                    self.status_label.config(text="ACCESS DENIED: Timeout ❌", fg="white", bg="#c0392b")
+                    self.timer_label.config(text="")
+
+                    self.db.log_access(self.admin_id, self.required_item, "DENIED", self.frozen_frame)
+                    self.render_frame(self.frozen_frame)
+                    self.after(30, self.update_loop)
+                    return
+
+
                 processed, result = self.analyzer.check_compliance(frame)
                 current_display = processed
 
                 if result == "ACCESS GRANTED":
-                    # Initialize timer if this is the first frame of detection
                     if self.gotrah_timer_start is None:
                         self.gotrah_timer_start = time.time()
                     
-                    elapsed = time.time() - self.gotrah_timer_start
+                    elapsed_hold = time.time() - self.gotrah_timer_start
                     
-                    if elapsed >= self.REQUIRED_HOLD_DURATION:
-                        # --- COUNTDOWN FINISHED ---
+                    if elapsed_hold >= self.REQUIRED_HOLD_DURATION:
                         self.state = "SUCCESS"
                         self.frozen_frame = current_display.copy()
                         self.status_label.config(text="ACCESS GRANTED ✅", fg="white", bg="#2c3e50")
-                        self.db.log_access(self.admin_id, self.required_item, "GRANTED")
-                        # Show the winning frame and stop the loop processing
+                        self.timer_label.config(text="")
+
+                        self.db.log_access(self.admin_id, self.required_item, "GRANTED", self.frozen_frame)
                         self.render_frame(self.frozen_frame)
                         self.after(30, self.update_loop)
                         return
                     else:
-                        # --- COUNTDOWN IN PROGRESS ---
-                        remaining = self.REQUIRED_HOLD_DURATION - elapsed
-                        self.status_label.config(
-                            text=f"Hold Still... {remaining:.1f}s", 
-                            fg="#27ae60", 
-                            bg="#f0f0f0"
-                        )
+                        remaining_hold = self.REQUIRED_HOLD_DURATION - elapsed_hold
+                        self.status_label.config(text=f"Hold Still... {remaining_hold:.1f}s", fg="#27ae60")
                 else:
-                    # Item lost/not detected, reset timer
                     self.gotrah_timer_start = None
                     self.status_label.config(text="Scanning...", fg="#d35400")
 
@@ -132,7 +142,6 @@ class DoorAccessWindow(tk.Toplevel):
         self.after(30, self.update_loop)
 
     def render_frame(self, frame):
-        """Converts BGR to RGB and pushes to Tkinter Label"""
         try:
             rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(rgb_image)
@@ -143,7 +152,6 @@ class DoorAccessWindow(tk.Toplevel):
             pass
 
     def destroy(self):
-        """Safety cleanup for camera hardware"""
         if hasattr(self, 'camera'):
             self.camera.stop()
         super().destroy()
