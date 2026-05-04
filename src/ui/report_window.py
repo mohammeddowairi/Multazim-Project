@@ -1,7 +1,8 @@
-import customtkinter as ctk
-from tkinter import ttk, messagebox
-from PIL import Image
+import csv
 import os
+from tkinter import ttk, messagebox, filedialog
+from PIL import Image
+import customtkinter as ctk
 from src.logic.database_manager import DatabaseManager
 
 class ReportPage(ctk.CTkFrame):
@@ -44,10 +45,16 @@ class ReportPage(ctk.CTkFrame):
                            variable=self.mode_var, command=self.apply_filters,
                            width=110, height=32, fg_color="#1f2c41", button_color="#3498db").pack(side="left", padx=5)
 
+        # Export CSV Button
+        ctk.CTkButton(self.filter_frame, text="Export CSV", width=90, height=32, 
+                      fg_color="#27ae60", hover_color="#1e8449",
+                      font=("Roboto", 12, "bold"),
+                      command=self.export_to_csv).pack(side="right", padx=20)
+
         # Reset Button
         ctk.CTkButton(self.filter_frame, text="Reset All", width=90, height=32, fg_color="#e74c3c", 
                       hover_color="#c0392b", font=("Roboto", 12, "bold"),
-                      command=self.reset_filters).pack(side="right", padx=20)
+                      command=self.reset_filters).pack(side="right", padx=0)
 
         # --- TABLE ---
         self.setup_table()
@@ -83,12 +90,9 @@ class ReportPage(ctk.CTkFrame):
         region = self.tree.identify_region(event.x, event.y)
         if region == "cell":
             column = self.tree.identify_column(event.x)
-            # Column #6 is the 'Image' column
             if column == "#6": 
                 item = self.tree.identify_row(event.y)
                 if item:
-                    # FIX: We use 'item' directly because we set iid=rec[0] 
-                    # in apply_filters. This 'item' IS the Database ID.
                     log_id = item
                     self.open_image_popup(log_id)
 
@@ -124,12 +128,8 @@ class ReportPage(ctk.CTkFrame):
         for i, rec in enumerate(records):
             display_id = total_count - i
             view_btn = "[ View ]"
-            
-            # (DisplayID, Timestamp, Mode, Org, Result, [View])
             display_values = (display_id, rec[1], rec[2], rec[4], rec[3], view_btn)
             
-            # iid=rec[0] is the SECRET Database ID (like 40). 
-            # This is what on_table_click uses.
             self.tree.insert("", "end", iid=rec[0], values=display_values)
             
             tag = "granted" if rec[3] == "GRANTED" else "denied"
@@ -141,3 +141,29 @@ class ReportPage(ctk.CTkFrame):
         self.status_var.set("All")
         self.mode_var.set("All")
         self.apply_filters()
+
+    def export_to_csv(self):
+        records = self.db.get_access_history(self.admin_id, self.status_var.get(), self.mode_var.get())
+        
+        if not records:
+            messagebox.showwarning("No Data", "There are no records to export with the current filters.")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")],
+            title="Export Access History"
+        )
+
+        if file_path:
+            try:
+                with open(file_path, mode='w', newline='', encoding='utf-8') as file:
+                    writer = csv.writer(file)
+                    writer.writerow(["Log ID", "Timestamp", "Mode", "Organization", "Result"])
+                    for rec in records:
+                        # rec order based on get_access_history: ID, Time, Mode, Result, Org
+                        writer.writerow([rec[0], rec[1], rec[2], rec[4], rec[3]])
+                
+                messagebox.showinfo("Success", f"Data exported successfully to:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("Export Error", f"An error occurred while saving: {e}")
