@@ -81,6 +81,7 @@ class DoorAccessWindow(tk.Toplevel):
     def update_loop(self):
         if not self.winfo_exists(): return
 
+        # Stop processing if result is already finalized
         if self.state in ["SUCCESS", "FAILED"]:
             if self.frozen_frame is not None:
                 self.render_frame(self.frozen_frame)
@@ -92,24 +93,18 @@ class DoorAccessWindow(tk.Toplevel):
             current_display = frame.copy()
 
             if self.state == "DETECTING":
-
+                # Handle timeout logic
                 elapsed_scan = time.time() - self.scan_start_time
                 remaining_scan = self.MAX_SCAN_DURATION - elapsed_scan
-                
-
                 self.timer_label.config(text=f"Time Remaining: {max(0, remaining_scan):.1f}s")
 
                 if elapsed_scan >= self.MAX_SCAN_DURATION:
                     self.state = "FAILED"
                     self.frozen_frame = current_display.copy()
                     self.status_label.config(text="ACCESS DENIED: Timeout ❌", fg="white", bg="#c0392b")
-                    self.timer_label.config(text="")
-
                     self.db.log_access(self.admin_id, self.required_item, "DENIED", self.frozen_frame)
                     self.render_frame(self.frozen_frame)
-                    self.after(30, self.update_loop)
                     return
-
 
                 processed, result = self.analyzer.check_compliance(frame)
                 current_display = processed
@@ -121,14 +116,16 @@ class DoorAccessWindow(tk.Toplevel):
                     elapsed_hold = time.time() - self.gotrah_timer_start
                     
                     if elapsed_hold >= self.REQUIRED_HOLD_DURATION:
+                        # --- FINAL ACTION: TRIGGER LOCK AFTER HOLD IS MET ---
+                        if self.state != "SUCCESS": 
+                            print(">>> HOLD DURATION MET: UNLOCKING NOW <<<")
+                            self.analyzer.hardware.unlock_door()
+
                         self.state = "SUCCESS"
                         self.frozen_frame = current_display.copy()
                         self.status_label.config(text="ACCESS GRANTED ✅", fg="white", bg="#2c3e50")
-                        self.timer_label.config(text="")
-
                         self.db.log_access(self.admin_id, self.required_item, "GRANTED", self.frozen_frame)
                         self.render_frame(self.frozen_frame)
-                        self.after(30, self.update_loop)
                         return
                     else:
                         remaining_hold = self.REQUIRED_HOLD_DURATION - elapsed_hold
@@ -151,7 +148,19 @@ class DoorAccessWindow(tk.Toplevel):
         except:
             pass
 
+    # def destroy(self):
+    #     if hasattr(self, 'camera'):
+    #         self.camera.stop()
+    #     super().destroy()
     def destroy(self):
+        # 1. Stop the camera
         if hasattr(self, 'camera'):
             self.camera.stop()
+        
+        # 2. IMPORTANT: Close the hardware connection so COM3 is free!
+        if hasattr(self, 'analyzer') and hasattr(self.analyzer, 'hardware'):
+            if self.analyzer.hardware.arduino:
+                self.analyzer.hardware.arduino.close()
+                print("COM3 Port Released Successfully.")
+        
         super().destroy()
